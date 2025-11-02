@@ -1,305 +1,141 @@
 import streamlit as st
-import pandas as pd
-import time
-import base64
 import json
-import os
+import time
+from pathlib import Path
 
-st.set_page_config(page_title="♠️ Spades", page_icon="♠️", layout="centered")
+state_file = Path("spades_state.json")
 
-SAVE_FILE = "spades_game_state.json"
-
-# --- Save/Load State ------------------------------------------------
 def save_state():
-    """Safely save only user-related session state to JSON."""
-    try:
-        state = {
-            k: v for k, v in st.session_state.items()
-            if not k.startswith("_") and k not in ["_is_running_with_streamlit", "_session_state"]
-        }
-        with open(SAVE_FILE, "w") as f:
-            json.dump(state, f)
-    except Exception as e:
-        st.warning(f"⚠️ Couldn't save game: {e}")
+    state = {
+        "players": st.session_state.players,
+        "scores": st.session_state.scores,
+        "bags": st.session_state.bags,
+        "round": st.session_state.round,
+        "show_scoreboard": st.session_state.show_scoreboard
+    }
+    state_file.write_text(json.dumps(state))
 
 def load_state():
-    """Load previous session state if save file exists."""
-    if os.path.exists(SAVE_FILE):
-        with open(SAVE_FILE, "r") as f:
-            data = json.load(f)
-            for k, v in data.items():
-                st.session_state[k] = v
+    if state_file.exists():
+        state = json.loads(state_file.read_text())
+        st.session_state.players = state.get("players", [])
+        st.session_state.scores = state.get("scores", {})
+        st.session_state.bags = state.get("bags", {})
+        st.session_state.round = state.get("round", 1)
+        st.session_state.show_scoreboard = state.get("show_scoreboard", False)
+    else:
+        st.session_state.players = []
+        st.session_state.scores = {}
+        st.session_state.bags = {}
+        st.session_state.round = 1
+        st.session_state.show_scoreboard = False
 
-load_state()
+st.set_page_config(page_title="Spades Scorekeeper", layout="centered")
 
-# --- Cached background loader --------------------------------------
-@st.cache_data
-def load_bg(image_file):
-    with open(image_file, "rb") as file:
-        return base64.b64encode(file.read()).decode()
+page_bg = """
+<style>
+[data-testid="stAppViewContainer"]{
+background: linear-gradient(180deg, #0b0c10, #1f2833);
+color: white;
+}
+[data-testid="stSidebar"]{
+background: #1f2833;
+}
+.stButton>button {
+background-color: #45a29e;
+color: white;
+border-radius: 10px;
+}
+.stNumberInput>div>input {
+background-color: #0b0c10;
+color: white;
+}
+</style>
+"""
+st.markdown(page_bg, unsafe_allow_html=True)
 
-def set_bg_from_local(image_file):
-    encoded = load_bg(image_file)
-    css = f"""
-    <style>
-    :root {{ color-scheme: dark; }}
-    html, body, [class*="stAppViewContainer"], .stApp {{
-        height: 100%; width: 100%; overflow-x: hidden;
-        background: linear-gradient(rgba(0,0,0,0.6), rgba(0,0,0,0.6)),
-                    url(data:image/png;base64,{encoded});
-        background-size: cover; background-position: center;
-        background-repeat: no-repeat; background-attachment: fixed;
-        color: #F5F5F5 !important; font-family: 'Poppins', sans-serif;
-    }}
-    .block-container {{
-        background: rgba(0, 0, 0, 0.55);
-        border-radius: 16px;
-        padding: 1.5rem;
-        box-shadow: 0 6px 25px rgba(0, 0, 0, 0.45);
-        margin: auto; max-width: 800px;
-    }}
-    h1, h2, h3, h4 {{
-        text-align: center; color: #FFFFFF !important;
-        text-shadow: 0 0 12px rgba(0,0,0,0.7); font-weight: 600;
-    }}
-    .stButton>button {{
-        background: linear-gradient(90deg, #7F00FF, #E100FF);
-        color: white !important; border: none; border-radius: 10px;
-        padding: 0.6rem 1.2rem; font-weight: 600; width: 100%;
-        box-shadow: 0px 0px 10px rgba(142,45,226,0.4);
-        transition: 0.3s ease;
-    }}
-    .stButton>button:hover {{
-        box-shadow: 0px 0px 25px rgba(255,255,255,0.6);
-        transform: scale(1.05);
-    }}
-    input, select, textarea {{
-        background-color: rgba(255,255,255,0.12) !important;
-        border-radius: 8px !important;
-        border: 1px solid rgba(255,255,255,0.25) !important;
-        color: #FFFFFF !important;
-    }}
-    div[data-testid="stExpander"] {{
-        background: rgba(255,255,255,0.08);
-        border-radius: 12px; color: #FFF !important;
-    }}
-    div[data-testid="stProgressBar"] > div {{
-        background-color: #BB86FC !important;
-    }}
-    @media (max-width: 768px) {{
-        .block-container {{ padding: 1rem; width: 95%; }}
-        h1 {{ font-size: 1.6rem !important; }}
-        .stButton>button {{ font-size: 0.9rem; padding: 0.5rem 1rem; }}
-    }}
-    @media (max-width: 480px) {{
-        h1 {{ font-size: 1.3rem !important; }}
-        .stButton>button {{ font-size: 0.85rem; padding: 0.4rem 0.8rem; }}
-    }}
-    </style>
-    """
-    st.markdown(css, unsafe_allow_html=True)
+if "players" not in st.session_state:
+    load_state()
 
-set_bg_from_local("4.jpg")
+st.sidebar.title("Menu")
 
-st.title("♠️ Spades")
-
-# --- Sidebar Buttons ------------------------------------------------
-with st.sidebar:
-    if st.button("📊 Scores"):
-        # ✅ FIX: no rerun to avoid resetting input widgets
-        st.session_state.show_scoreboard = not st.session_state.get("show_scoreboard", False)
-        save_state()
-
-    if st.button("🔁 Restart Game"):
-        # Clean restart
-        st.session_state.clear()
-        if os.path.exists(SAVE_FILE):
-            os.remove(SAVE_FILE)
-        st.success("Game restarted!")
-        st.experimental_rerun()
-
-# --- Initialize session state ---------------------------------------
-if "setup_done" not in st.session_state:
-    st.session_state.setup_done = False
-    st.session_state.names_entered = False
-    st.session_state.round = 1
-    st.session_state.scores = []
-    st.session_state.bags = []
-    st.session_state.show_scoreboard = False
-    st.session_state.history = []
-    st.session_state.round_summary_display = False
-
-# --- Scoreboard Display ---------------------------------------------
-if st.session_state.get("show_scoreboard", False) and "scores" in st.session_state:
-    with st.expander("📊 Current Scoreboard", expanded=True):
-        st.subheader("🏅 Total Scores")
-        for i, name in enumerate(st.session_state.player_names):
-            if st.session_state.enable_bags:
-                st.write(f"**{name or f'Player {i+1}'}:** {st.session_state.scores[i]} pts ({st.session_state.bags[i]} bags)")
-            else:
-                st.write(f"**{name or f'Player {i+1}'}:** {st.session_state.scores[i]} pts")
-        if st.session_state.history:
-            st.markdown("---")
-            st.subheader("🧾 Round-wise Details")
-            df = pd.DataFrame(st.session_state.history)
-            rounds = sorted(df["Round"].unique())
-            for r in rounds:
-                with st.expander(f"▶️ Round {r}", expanded=False):
-                    rd = df[df["Round"] == r][["Player", "Bid", "Win", "Round Points", "Total Points"] + (["Bags"] if st.session_state.enable_bags else [])]
-                    st.table(rd.reset_index(drop=True))
-        else:
-            st.info("No rounds completed yet.")
-        st.write("---")
-
-# --- Game Setup -----------------------------------------------------
-if not st.session_state.setup_done:
-    st.header("Game Setup")
-    num_decks = st.number_input("Number of Decks", min_value=1, step=1, value=1)
-    num_players = st.number_input("Number of Players", min_value=2, step=1, value=4)
-    cards_per_deck = 52
-    max_rounds_by_decks = 13 * num_decks
-    max_possible_round = min(13, (cards_per_deck * num_decks) // num_players)
-    total_rounds = min(max_possible_round, max_rounds_by_decks)
-    st.markdown(f"**🃏 Total Rounds Possible:** {total_rounds}")
-    game_mode = st.selectbox("Select Game Mode", ["With Bags (Standard Rules)", "Without Bags (No Bag Penalty)"], index=0)
-    if st.button("Next"):
-        st.session_state.num_decks = num_decks
-        st.session_state.num_players = num_players
-        st.session_state.enable_bags = game_mode.startswith("With Bags")
-        st.session_state.player_names = ["" for _ in range(num_players)]
-        st.session_state.scores = [0 for _ in range(num_players)]
-        st.session_state.bags = [0 for _ in range(num_players)]
-        st.session_state.total_rounds = total_rounds
-        st.session_state.setup_done = True
-        save_state()
-        st.experimental_rerun()
-
-# --- Player Names ---------------------------------------------------
-elif not st.session_state.names_entered:
-    st.header("Enter Player Names")
-    for i in range(st.session_state.num_players):
-        st.session_state.player_names[i] = st.text_input(f"Player {i+1} Name", st.session_state.player_names[i])
-    if st.button("Start Game"):
-        st.session_state.names_entered = True
-        save_state()
-        st.experimental_rerun()
-
-# --- Round Loop -----------------------------------------------------
-elif st.session_state.round <= st.session_state.total_rounds:
-    if st.session_state.round_summary_display:
-        st.header(f"🏁 Round {st.session_state.round - 1} Summary")
-        st.subheader("📊 Current Scores")
-        for i, name in enumerate(st.session_state.player_names):
-            if st.session_state.enable_bags:
-                st.write(f"**{name or f'Player {i+1}'}:** {st.session_state.scores[i]} pts ({st.session_state.bags[i]} bags)")
-            else:
-                st.write(f"**{name or f'Player {i+1}'}:** {st.session_state.scores[i]} pts")
-        st.markdown("---")
-
-        countdown_placeholder = st.empty()
-        for sec in range(3, 0, -1):
-            countdown_placeholder.markdown(
-                f"<h3 style='text-align:center; color:#FFD700;'>🕒 Round {st.session_state.round} starts in <b>{sec}</b>...</h3>",
-                unsafe_allow_html=True,
-            )
-            time.sleep(1)
-        countdown_placeholder.empty()
-        st.session_state.round_summary_display = False
-        save_state()
-        st.experimental_rerun()
-
-    round_num = st.session_state.round
-    st.header(f"Round {round_num}")
-    st.progress(round_num / st.session_state.total_rounds)
-
-    bids, wins = [], []
-    st.markdown("### ✍️ Enter Bids and Wins")
-    cols = st.columns([2, 1, 1])
-    cols[0].markdown("**Player**")
-    cols[1].markdown("**Bid**")
-    cols[2].markdown("**Won**")
-
-    round_key = f"round_{round_num}"
-    for i, name in enumerate(st.session_state.player_names):
-        col1, col2, col3 = st.columns([2, 1, 1])
-        col1.text(name or f"Player {i+1}")
-        bid = col2.number_input("Bid", min_value=0, step=1, key=f"bid_{i}_{round_key}", label_visibility="collapsed")
-        win = col3.number_input("Win", min_value=0, step=1, key=f"win_{i}_{round_key}", label_visibility="collapsed")
-        bids.append(bid)
-        wins.append(win)
-
-    if st.button("Submit Round ✅"):
-        total_wins = sum(wins)
-        tricks_this_round = round_num
-        if total_wins != tricks_this_round:
-            st.error(f"❌ Invalid: Total wins ({total_wins}) must equal tricks in this round ({tricks_this_round}).")
-            st.stop()
-
-        round_summary = []
-        for i in range(st.session_state.num_players):
-            bid = bids[i]
-            win = wins[i]
-            # ⚠️ SCORING LOGIC UNCHANGED
-            if st.session_state.enable_bags:
-                if bid == 0 and win == 0:
-                    points = 0
-                elif win == bid:
-                    points = 10 * bid
-                elif win < bid:
-                    points = -10 * bid
-                else:
-                    extras = win - bid
-                    points = 10 * bid + extras
-                    st.session_state.bags[i] += extras
-                st.session_state.scores[i] += points
-                if st.session_state.bags[i] >= 5:
-                    st.session_state.scores[i] -= 50
-                    st.session_state.bags[i] -= 5
-                    st.warning(f"{st.session_state.player_names[i]} lost 50 pts (5 bags penalty)")
-            else:
-                if bid == 0 and win == 0:
-                    points = 0
-                elif win == bid:
-                    points = 10 * bid
-                elif win < bid:
-                    points = -10 * bid
-                else:
-                    extras = win - bid
-                    points = 10 * bid + extras
-                st.session_state.scores[i] += points
-
-            round_summary.append(f"{st.session_state.player_names[i]}: +{points} pts")
-            entry = {
-                "Round": round_num,
-                "Player": st.session_state.player_names[i],
-                "Bid": bid,
-                "Win": win,
-                "Round Points": points,
-                "Total Points": st.session_state.scores[i],
-            }
-            if st.session_state.enable_bags:
-                entry["Bags"] = st.session_state.bags[i]
-            st.session_state.history.append(entry)
-
-        st.success(f"✅ Round {round_num} completed successfully!")
-        st.info("\n".join(round_summary))
-        st.session_state.round += 1
-        st.session_state.round_summary_display = True
-        save_state()
-        st.experimental_rerun()
-
-# --- Game Over ------------------------------------------------------
-else:
-    st.header("🏁 Final Results")
-    for i, name in enumerate(st.session_state.player_names):
-        if st.session_state.enable_bags:
-            st.write(f"{name or f'Player {i+1}'}: **{st.session_state.scores[i]} pts** ({st.session_state.bags[i]} bags)")
-        else:
-            st.write(f"{name or f'Player {i+1}'}: **{st.session_state.scores[i]} pts**")
-
-    winner_idx = st.session_state.scores.index(max(st.session_state.scores))
-    st.success(f"🏆 Winner: {st.session_state.player_names[winner_idx]}")
-    if st.checkbox("Enable Scoreboard Download"):
-        df = pd.DataFrame(st.session_state.history)
-        st.download_button("💾 Download Full Scoreboard (CSV)", df.to_csv(index=False), "spades_full_scoreboard.csv")
+if st.sidebar.button("📊 Scores"):
+    st.session_state.show_scoreboard = not st.session_state.get("show_scoreboard", False)
     save_state()
+
+if st.sidebar.button("🔄 Restart Game"):
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
+    if state_file.exists():
+        state_file.unlink()
+    st.success("Game restarted!")
+    st.rerun()
+
+if not st.session_state.players:
+    st.title("Spades Scorekeeper")
+    num_players = st.number_input("Enter number of players", 2, 10, 4)
+    if st.button("Continue"):
+        st.session_state.num_players = num_players
+        st.session_state.player_names_entered = False
+        st.rerun()
+
+if "num_players" in st.session_state and not st.session_state.get("player_names_entered", False):
+    st.title("Enter Player Names")
+    players = []
+    for i in range(st.session_state.num_players):
+        name = st.text_input(f"Player {i+1} name", key=f"name_{i}")
+        if name:
+            players.append(name)
+    if st.button("Start Game") and len(players) == st.session_state.num_players:
+        st.session_state.players = players
+        st.session_state.scores = {p: 0 for p in players}
+        st.session_state.bags = {p: 0 for p in players}
+        st.session_state.round = 1
+        st.session_state.player_names_entered = True
+        save_state()
+        st.rerun()
+
+if st.session_state.players:
+    players = st.session_state.players
+    if st.session_state.show_scoreboard:
+        st.title("📊 Scoreboard")
+        scoreboard = ""
+        for p in players:
+            scoreboard += f"**{p}** — Score: {st.session_state.scores[p]} | Bags: {st.session_state.bags[p]}\n\n"
+        st.markdown(scoreboard)
+    else:
+        st.title(f"Round {st.session_state.round}")
+        st.subheader("Enter Bids and Wins")
+
+        bids = {}
+        wins = {}
+
+        cols = st.columns(2)
+        with cols[0]:
+            st.write("**Bids**")
+            for i, p in enumerate(players):
+                bids[p] = st.number_input(f"{p} bid", 0, 13, 0, key=f"bid_{i}_{st.session_state.round}")
+        with cols[1]:
+            st.write("**Wins**")
+            for i, p in enumerate(players):
+                wins[p] = st.number_input(f"{p} wins", 0, 13, 0, key=f"win_{i}_{st.session_state.round}")
+
+        if st.button("Submit Round"):
+            for p in players:
+                bid = bids[p]
+                win = wins[p]
+                if win == bid:
+                    st.session_state.scores[p] += 10 * bid + win
+                elif win > bid:
+                    st.session_state.scores[p] += 10 * bid + (win - bid)
+                    st.session_state.bags[p] += (win - bid)
+                else:
+                    st.session_state.scores[p] -= 10 * bid
+                if st.session_state.bags[p] >= 10:
+                    st.session_state.scores[p] -= 100
+                    st.session_state.bags[p] -= 10
+
+            st.success("Round complete! Scores updated.")
+            save_state()
+            st.session_state.round += 1
+            st.rerun()
